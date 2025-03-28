@@ -331,7 +331,7 @@ def glow_text(text):
 
 def header():
     """Display the application header"""
-    st.markdown('<div class="header-text">SECURITY SCANNER</div>', unsafe_allow_html=True)
+    st.markdown('<div class="header-text">PLATFORM SCRAPER</div>', unsafe_allow_html=True)
     st.markdown('<div class="subheader-text">Advanced Web Platform Monitoring & Analysis</div>', unsafe_allow_html=True)
 
 def tooltip(text, tooltip_text):

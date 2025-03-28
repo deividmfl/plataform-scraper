@@ -21,7 +21,7 @@ from assets.terminal_style import (
 
 # Configuration
 st.set_page_config(
-    page_title="Security Scanner - Plataform Monitor",
+    page_title="Platform Scraper",
     page_icon="🔍",
     layout="wide",
     initial_sidebar_state="expanded"

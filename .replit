@@ -17,10 +17,10 @@ author = "agent"
 
 [[workflows.workflow.tasks]]
 task = "workflow.run"
-args = "Streamlit App"
+args = "Platform Scraper"
 
 [[workflows.workflow]]
-name = "Streamlit App"
+name = "Platform Scraper"
 author = "agent"
 
 [workflows.workflow.metadata]
