@@ -1,5 +1,7 @@
 {pkgs}: {
   deps = [
+    pkgs.unzip
+    pkgs.chromium
     pkgs.zlib
     pkgs.tk
     pkgs.tcl

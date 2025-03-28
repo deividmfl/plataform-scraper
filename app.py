@@ -201,7 +201,7 @@ with tab1:
 with tab2:
     # Platform statistics
     platform_data = db.get_platform_statistics()
-    if platform_data:
+    if not platform_data.empty if isinstance(platform_data, pd.DataFrame) else False:
         st.subheader("Most Mentioned Investment Platforms")
         
         # Create bar chart
@@ -226,7 +226,9 @@ with tab2:
         st.plotly_chart(fig, use_container_width=True)
         
         # Platform details
-        for platform, count in platform_data.items():
+        for i, row in platform_data.iterrows():
+            platform = row['platform']
+            count = row['count']
             with st.expander(f"{platform} - {count} mentions"):
                 videos = db.get_videos_by_platform(platform)
                 for video in videos:
@@ -237,7 +239,7 @@ with tab2:
 with tab3:
     # Messaging group statistics
     groups_data = db.get_messaging_group_statistics()
-    if groups_data:
+    if isinstance(groups_data, list) and len(groups_data) > 0:
         st.subheader("Detected Messaging Groups")
         
         # Group by platform (WhatsApp, Telegram, etc.)
