@@ -4,8 +4,8 @@ address = "0.0.0.0"
 port = 5000
 
 [theme]
-primaryColor = "#00ff41"  # Matrix green
-backgroundColor = "#0e0e0e"  # Dark background
-secondaryBackgroundColor = "#1c1c1c"  # Slightly lighter dark background
-textColor = "#00ff41"  # Matrix green text
-font = "monospace"  # Terminal-style font
+primaryColor = "#00ff00"  # Matrix neon green
+backgroundColor = "#000000"  # Black background
+secondaryBackgroundColor = "#0a0a0a"  # Slightly lighter black
+textColor = "#00ff00"  # Matrix neon green text
+font = "monospace"  # Terminal-like font

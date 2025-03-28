@@ -4,6 +4,13 @@ version = "0.1.0"
 description = "Add your description here"
 requires-python = ">=3.11"
 dependencies = [
+    "apscheduler>=3.11.0",
+    "beautifulsoup4>=4.13.3",
+    "pandas>=2.2.3",
+    "pillow>=11.1.0",
+    "plotly>=6.0.1",
+    "requests>=2.32.3",
+    "selenium>=4.30.0",
     "streamlit>=1.44.0",
     "trafilatura>=2.0.0",
 ]
