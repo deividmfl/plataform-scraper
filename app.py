@@ -12,6 +12,7 @@ import plotly.graph_objects as go
 # Import custom modules
 from scrapers.youtube_scraper import YouTubeScraper
 from scrapers.text_processor import TextProcessor
+from scrapers.web_scraper import WebScraper
 from assets.terminal_style import (
     apply_terminal_style, terminal_container, console_print, 
     typing_animation, glow_text, header, tooltip, 
@@ -548,6 +549,51 @@ def main():
     with tab4:
         # Websites tab
         terminal_container("WEBSITE ANALYSIS", "")
+        
+        # Add option to analyze specific website
+        with st.expander("Analyze specific website", expanded=False):
+            website_url = st.text_input("Enter website URL to analyze:", 
+                                         placeholder="https://example.com")
+            analyze_col1, analyze_col2 = st.columns([1, 3])
+            with analyze_col1:
+                if st.button("Analyze Website", use_container_width=True):
+                    if website_url:
+                        with analyze_col2:
+                            with st.spinner(f"Analyzing {website_url}..."):
+                                # Initialize web scraper
+                                web_scraper = WebScraper()
+                                
+                                # Extract content
+                                title, content = web_scraper.get_website_text_content(website_url)
+                                
+                                if title and content:
+                                    st.success(f"Successfully analyzed: {title}")
+                                    
+                                    # Show content in terminal-like container
+                                    terminal_container(
+                                        f"CONTENT: {title}", 
+                                        content[:2000] + ("..." if len(content) > 2000 else "")
+                                    )
+                                    
+                                    # Process text to find potential platforms and messaging groups
+                                    text_processor = TextProcessor()
+                                    platforms = text_processor.extract_platforms(content)
+                                    links = text_processor.extract_links(content)
+                                    groups = text_processor.extract_messaging_groups(content)
+                                    
+                                    # Display findings
+                                    if platforms:
+                                        st.markdown("#### Detected Platforms:")
+                                        st.write(", ".join(platforms))
+                                    
+                                    if groups:
+                                        st.markdown("#### Detected Messaging Groups:")
+                                        for group in groups:
+                                            st.markdown(f"- {group.get('platform')}: {group.get('link')}")
+                                else:
+                                    st.error(f"Failed to extract content from {website_url}")
+                    else:
+                        st.warning("Please enter a valid URL")
         
         # Get website statistics
         website_data = get_website_statistics()
