@@ -261,7 +261,7 @@ def apply_terminal_style():
     </style>
     """, unsafe_allow_html=True)
 
-def terminal_container(title, content, expand=True):
+def terminal_container(title, content="", expand=True):
     """
     Create a terminal-like container
     
@@ -270,7 +270,7 @@ def terminal_container(title, content, expand=True):
         content: HTML content to display
         expand: Whether to expand the container by default
     """
-    terminal_html = f"""
+    header_html = f"""
     <div class="terminal-container">
         <div class="terminal-header">
             <div class="terminal-dots">
@@ -281,11 +281,20 @@ def terminal_container(title, content, expand=True):
             <div style="color: #00ff00; font-family: 'Courier New', monospace;">{title}</div>
             <div style="width: 60px;"></div>
         </div>
+    """
+    
+    if content:
+        content_html = f"""
         <div class="terminal-content">
             {content}
         </div>
-    </div>
-    """
+        """
+    else:
+        content_html = ""
+        
+    footer_html = "</div>"
+    
+    terminal_html = header_html + content_html + footer_html
     
     if expand:
         st.markdown(terminal_html, unsafe_allow_html=True)

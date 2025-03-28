@@ -90,6 +90,53 @@ def get_messaging_group_statistics():
     
     return groups
 
+def get_website_statistics():
+    """Get statistics about mentioned websites."""
+    videos = load_videos()
+    
+    # Extract domain from URLs and count frequencies
+    domain_counts = {}
+    website_details = {}
+    
+    for video in videos:
+        for url in video.get('links', []):
+            try:
+                # Parse URL to get domain
+                parsed = urlparse(url)
+                domain = parsed.netloc
+                
+                # Skip empty domains
+                if not domain:
+                    continue
+                
+                # Count domain frequency
+                if domain in domain_counts:
+                    domain_counts[domain] += 1
+                    if url not in website_details[domain]['urls']:
+                        website_details[domain]['urls'].append(url)
+                    if video['id'] not in website_details[domain]['videos']:
+                        website_details[domain]['videos'].append(video['id'])
+                        website_details[domain]['video_titles'].append(video.get('title', 'Unknown'))
+                else:
+                    domain_counts[domain] = 1
+                    website_details[domain] = {
+                        'domain': domain,
+                        'urls': [url],
+                        'videos': [video['id']],
+                        'video_titles': [video.get('title', 'Unknown')]
+                    }
+            except:
+                # Skip invalid URLs
+                continue
+    
+    # Convert to DataFrame for easier visualization
+    website_data = pd.DataFrame([
+        {"domain": domain, "count": count, "details": website_details[domain]}
+        for domain, count in sorted(domain_counts.items(), key=lambda x: x[1], reverse=True)
+    ])
+    
+    return website_data
+
 def get_videos_by_platform(platform_name):
     """Get videos that mention a specific platform."""
     videos = load_videos()
@@ -114,6 +161,9 @@ def start_scan(keywords, days_back, max_videos):
     new_videos = []
     keywords_list = [k.strip() for k in keywords.split(',')]
     
+    # Track seen titles for grouping similar videos
+    seen_titles = {}
+    
     # Scan for each keyword
     for i, keyword in enumerate(keywords_list):
         status_text.text(f"[*] Searching for videos related to '{keyword}'...")
@@ -126,9 +176,32 @@ def start_scan(keywords, days_back, max_videos):
         # Process each video
         for j, video in enumerate(videos):
             video_id = video['id']
+            video_title = video['title'].lower()
             
             # Skip if we already have this video
             if video_id in existing_ids:
+                continue
+                
+            # Check for similar titles - if we have a similar title, skip this video
+            # We use a simplified approach: normalize the title and check if we've seen a similar one
+            normalized_title = re.sub(r'[^\w\s]', '', video_title).strip()
+            
+            # Skip if we've seen a very similar title (> 80% similarity)
+            skip_video = False
+            for seen_title, seen_id in seen_titles.items():
+                if seen_title == normalized_title or (
+                    len(seen_title) > 10 and (
+                        seen_title in normalized_title or 
+                        normalized_title in seen_title or
+                        (len(set(normalized_title.split()) & set(seen_title.split())) / 
+                        max(len(set(normalized_title.split())), len(set(seen_title.split())))) > 0.8
+                    )
+                ):
+                    skip_video = True
+                    print(f"[!] Skipping similar video: {video_title} (similar to {seen_title})")
+                    break
+                    
+            if skip_video:
                 continue
                 
             # Update progress
@@ -156,6 +229,9 @@ def start_scan(keywords, days_back, max_videos):
             # Add to new videos list
             new_videos.append(full_video)
             existing_ids.add(video_id)
+            
+            # Remember this title
+            seen_titles[normalized_title] = video_id
             
     # Save all videos
     all_videos = existing_videos + new_videos
@@ -324,7 +400,7 @@ def main():
             """)
     
     # Create tabs for different views
-    tab1, tab2, tab3 = st.tabs(["Videos", "Platforms", "Messaging Groups"])
+    tab1, tab2, tab3, tab4 = st.tabs(["Videos", "Platforms", "Messaging Groups", "Websites"])
     
     with tab1:
         # Videos tab
@@ -468,6 +544,63 @@ def main():
                         st.markdown(f"- {group.get('name', 'Unknown Group')}: [{group.get('link', '#')}]({group.get('link', '#')})")
         else:
             st.info("No messaging groups detected yet. Start a scan to find investment-related groups.")
+    
+    with tab4:
+        # Websites tab
+        terminal_container("WEBSITE ANALYSIS", "")
+        
+        # Get website statistics
+        website_data = get_website_statistics()
+        
+        if not website_data.empty if isinstance(website_data, pd.DataFrame) else False:
+            # Website domain count chart
+            if len(website_data) > 0:
+                # Limit to top 15 domains for readability
+                top_domains = website_data.head(15)
+                
+                fig = px.bar(
+                    top_domains,
+                    x='count',
+                    y='domain',
+                    orientation='h',
+                    title="Most Referenced Websites",
+                    color='count',
+                    color_continuous_scale=['#00ff00', '#ffff00', '#ff0000']
+                )
+                
+                fig.update_layout(
+                    plot_bgcolor='rgba(0,0,0,0)',
+                    paper_bgcolor='rgba(0,0,0,0)',
+                    font_color='#00ff00',
+                    xaxis=dict(title="Mentions", showgrid=False),
+                    yaxis=dict(title="", showgrid=False),
+                    margin=dict(l=0, r=0, t=30, b=0)
+                )
+                
+                st.plotly_chart(fig, use_container_width=True)
+                
+                # Domain details in expandable sections
+                st.markdown("### Website Details")
+                
+                for idx, row in website_data.iterrows():
+                    domain = row['domain']
+                    count = row['count']
+                    details = row['details']
+                    
+                    with st.expander(f"{domain} ({count} mentions)"):
+                        # Show unique URLs for this domain
+                        st.markdown("#### URLs:")
+                        for url in details['urls']:
+                            st.markdown(f"- [{url}]({url})")
+                        
+                        # Show videos that mentioned this domain
+                        st.markdown("#### Mentioned in videos:")
+                        for vid_id, vid_title in zip(details['videos'], details['video_titles']):
+                            st.markdown(f"- [{vid_title}](https://youtube.com/watch?v={vid_id})")
+            else:
+                st.info("No website data to display.")
+        else:
+            st.info("No website data available. Start a scan to track websites mentioned in videos.")
 
 if __name__ == "__main__":
     main()
