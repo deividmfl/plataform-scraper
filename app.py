@@ -1,284 +1,473 @@
 import streamlit as st
 import pandas as pd
 import time
-import os
 import datetime
-from pathlib import Path
+import json
+import os
+import re
+from urllib.parse import urlparse
 import plotly.express as px
 import plotly.graph_objects as go
-from PIL import Image
-import requests
-from io import BytesIO
 
+# Import custom modules
 from scrapers.youtube_scraper import YouTubeScraper
 from scrapers.text_processor import TextProcessor
-from utils.database import Database
-from utils.notification import EmailNotifier
-from utils.scheduler import Scheduler
-from assets.matrix_style import apply_matrix_style
+from assets.terminal_style import (
+    apply_terminal_style, terminal_container, console_print, 
+    typing_animation, glow_text, header, tooltip, 
+    warning, success, blinking_cursor
+)
 
-# Apply Matrix-inspired styling
-apply_matrix_style()
+# Configuration
+st.set_page_config(
+    page_title="Security Scanner - Plataform Monitor",
+    page_icon="🔍",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 
-# Initialize session state
-if 'scan_running' not in st.session_state:
-    st.session_state.scan_running = False
-if 'last_scan' not in st.session_state:
-    st.session_state.last_scan = None
-if 'video_count' not in st.session_state:
-    st.session_state.video_count = 0
-if 'platforms_detected' not in st.session_state:
-    st.session_state.platforms_detected = 0
-if 'messaging_groups' not in st.session_state:
-    st.session_state.messaging_groups = 0
+# Apply terminal style
+apply_terminal_style()
 
-# Initialize database
-db = Database()
-# Initialize text processor
-text_processor = TextProcessor()
-# Initialize notifier
-email_notifier = EmailNotifier()
+# Function to ensure data directory exists
+def ensure_data_directory():
+    """Ensure the data directory exists."""
+    os.makedirs('data', exist_ok=True)
 
-# Function to initiate scan
-def start_scan(keywords, days_back, max_videos):
-    st.session_state.scan_running = True
-    
-    # Initialize scraper
-    youtube_scraper = YouTubeScraper()
-    
-    # Get videos
-    progress_bar = st.progress(0)
-    status_text = st.empty()
-    
-    # Perform search for each keyword
-    all_videos = []
-    for i, keyword in enumerate(keywords):
-        status_text.text(f"Scanning YouTube for: {keyword}")
-        videos = youtube_scraper.search_videos(keyword, days_back, max_videos // len(keywords))
-        all_videos.extend(videos)
-        progress_bar.progress((i + 1) / len(keywords) * 0.5)
-    
-    # Process videos
-    processed_videos = []
-    for i, video in enumerate(all_videos):
-        status_text.text(f"Processing video {i+1}/{len(all_videos)}: {video['title']}")
-        
-        # Extract description and metadata
-        video_details = youtube_scraper.get_video_details(video['id'])
-        
-        # Process description for platforms, links and messaging groups
-        if 'description' in video_details:
-            platforms = text_processor.extract_platforms(video_details['description'])
-            links = text_processor.extract_links(video_details['description'])
-            messaging_groups = text_processor.extract_messaging_groups(video_details['description'])
-            
-            video_details['platforms'] = platforms
-            video_details['links'] = links
-            video_details['messaging_groups'] = messaging_groups
-            
-            processed_videos.append(video_details)
-        
-        progress_bar.progress(0.5 + (i + 1) / len(all_videos) * 0.5)
-    
-    # Save to database
-    db.save_videos(processed_videos)
-    
-    # Update statistics
-    st.session_state.video_count = len(processed_videos)
-    st.session_state.platforms_detected = sum(len(v.get('platforms', [])) for v in processed_videos)
-    st.session_state.messaging_groups = sum(len(v.get('messaging_groups', [])) for v in processed_videos)
-    st.session_state.last_scan = datetime.datetime.now()
-    
-    # Send notification if new videos were found
-    if processed_videos:
-        email_notifier.send_notification(f"Found {len(processed_videos)} new investment videos", processed_videos)
-    
-    status_text.text("Scan completed!")
-    st.session_state.scan_running = False
-
-# Main app layout
-st.title("Investment Platform Tracker")
-st.markdown("<div style='text-align:center;'><h3 style='color:#00ff00;'>Matrix-Inspired Video Intelligence System</h3></div>", unsafe_allow_html=True)
-
-# Sidebar - Configuration and Controls
-with st.sidebar:
-    # Load background images
+# Database functions
+def load_videos():
+    """Load videos from JSON file."""
+    ensure_data_directory()
     try:
-        # Attempt to load image from URL
-        response = requests.get("https://images.unsplash.com/photo-1606606767399-01e271823a2e")
-        matrix_bg = Image.open(BytesIO(response.content))
-        st.image(matrix_bg, use_column_width=True)
-    except:
-        st.write("Matrix Code Visualization")
+        if os.path.exists('data/videos.json'):
+            with open('data/videos.json', 'r', encoding='utf-8') as f:
+                return json.load(f)
+        return []
+    except Exception as e:
+        st.error(f"Error loading videos: {str(e)}")
+        return []
+
+def save_videos(videos):
+    """Save videos to JSON file."""
+    ensure_data_directory()
+    try:
+        with open('data/videos.json', 'w', encoding='utf-8') as f:
+            json.dump(videos, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        st.error(f"Error saving videos: {str(e)}")
+
+# Data processing functions
+def get_platform_statistics():
+    """Get statistics about the most mentioned platforms."""
+    videos = load_videos()
     
-    st.header("Scan Parameters")
-    
-    # Input keywords
-    keywords_input = st.text_area("Keywords (one per line)", 
-                                "plataforma de investimento\npagamento instantâneo\nprova de pagamento\nmultinível")
-    keywords = [k.strip() for k in keywords_input.split("\n") if k.strip()]
-    
-    # Days to look back
-    days_back = st.slider("Days to look back", 1, 30, 7)
-    
-    # Max videos to retrieve
-    max_videos = st.slider("Maximum videos to scan", 10, 200, 50)
-    
-    # Email notification settings
-    st.header("Notifications")
-    email = st.text_input("Email for notifications", "user@example.com")
-    
-    # Scan button
-    if st.button("Start Scan"):
-        if not st.session_state.scan_running:
-            start_scan(keywords, days_back, max_videos)
-    
-    # Display last scan time
-    if st.session_state.last_scan:
-        st.write(f"Last scan: {st.session_state.last_scan.strftime('%Y-%m-%d %H:%M')}")
-
-# Main dashboard area
-col1, col2, col3 = st.columns(3)
-
-with col1:
-    st.metric("Videos Tracked", st.session_state.video_count)
-
-with col2:
-    st.metric("Platforms Detected", st.session_state.platforms_detected)
-
-with col3:
-    st.metric("Messaging Groups", st.session_state.messaging_groups)
-
-# Tabs for different views
-tab1, tab2, tab3 = st.tabs(["Videos", "Platforms", "Messaging Groups"])
-
-with tab1:
-    # Display video data
-    videos = db.get_videos()
-    if videos:
-        # Create a dataframe for display
-        video_df = pd.DataFrame(videos)
-        
-        for i, video in enumerate(videos):
-            with st.expander(f"{i+1}. {video.get('title', 'Untitled')}"):
-                col1, col2 = st.columns([1, 2])
-                
-                with col1:
-                    if 'thumbnail' in video:
-                        st.image(video['thumbnail'], use_column_width=True)
-                    st.write(f"**Channel:** {video.get('channel_name', 'Unknown')}")
-                    st.write(f"**Published:** {video.get('publish_date', 'Unknown')}")
-                    st.write(f"**Views:** {video.get('view_count', 'Unknown')}")
-                    st.write(f"**Watch:** [Open on YouTube](https://youtube.com/watch?v={video.get('id', '')})")
-                
-                with col2:
-                    st.write("**Description:**")
-                    st.write(video.get('description', 'No description available')[:300] + "...")
-                    
-                    st.write("**Detected Platforms:**")
-                    if 'platforms' in video and video['platforms']:
-                        for platform in video['platforms']:
-                            st.write(f"- {platform}")
-                    else:
-                        st.write("No investment platforms detected")
-                    
-                    st.write("**Detected Links:**")
-                    if 'links' in video and video['links']:
-                        for link in video['links']:
-                            st.write(f"- [{link}]({link})")
-                    else:
-                        st.write("No links detected")
-                    
-                    st.write("**Messaging Groups:**")
-                    if 'messaging_groups' in video and video['messaging_groups']:
-                        for group in video['messaging_groups']:
-                            st.write(f"- {group['platform']}: {group['link']}")
-                    else:
-                        st.write("No messaging groups detected")
-    else:
-        st.info("No videos have been scanned yet. Start a scan to track investment videos.")
-
-with tab2:
-    # Platform statistics
-    platform_data = db.get_platform_statistics()
-    if not platform_data.empty if isinstance(platform_data, pd.DataFrame) else False:
-        st.subheader("Most Mentioned Investment Platforms")
-        
-        # Create bar chart
-        fig = px.bar(
-            platform_data, 
-            x='count', 
-            y='platform', 
-            orientation='h',
-            color='count',
-            color_continuous_scale=['#00ff00', '#ff0000'],
-            title="Platform Mentions"
-        )
-        
-        fig.update_layout(
-            plot_bgcolor='black',
-            paper_bgcolor='black',
-            font_color='#00ff00',
-            yaxis_title="",
-            xaxis_title="Mention Count"
-        )
-        
-        st.plotly_chart(fig, use_container_width=True)
-        
-        # Platform details
-        for i, row in platform_data.iterrows():
-            platform = row['platform']
-            count = row['count']
-            with st.expander(f"{platform} - {count} mentions"):
-                videos = db.get_videos_by_platform(platform)
-                for video in videos:
-                    st.write(f"- [{video.get('title', 'Untitled')}](https://youtube.com/watch?v={video.get('id', '')})")
-    else:
-        st.info("No platform data available. Start a scan to track investment platforms.")
-
-with tab3:
-    # Messaging group statistics
-    groups_data = db.get_messaging_group_statistics()
-    if isinstance(groups_data, list) and len(groups_data) > 0:
-        st.subheader("Detected Messaging Groups")
-        
-        # Group by platform (WhatsApp, Telegram, etc.)
-        platform_counts = {}
-        for group in groups_data:
-            platform = group.get('platform', 'Unknown')
+    # Count platform mentions
+    platform_counts = {}
+    for video in videos:
+        for platform in video.get('platforms', []):
             if platform in platform_counts:
                 platform_counts[platform] += 1
             else:
                 platform_counts[platform] = 1
-        
-        # Create pie chart
-        fig = px.pie(
-            names=list(platform_counts.keys()),
-            values=list(platform_counts.values()),
-            title="Messaging Groups by Platform",
-            color_discrete_sequence=['#00ff00', '#ff0000', '#ffffff', '#00ffff']
-        )
-        
-        fig.update_layout(
-            plot_bgcolor='black',
-            paper_bgcolor='black',
-            font_color='#00ff00'
-        )
-        
-        st.plotly_chart(fig, use_container_width=True)
-        
-        # List all groups
-        st.subheader("All Detected Groups")
-        for group in groups_data:
-            st.write(f"- {group.get('platform', 'Unknown')}: [{group.get('name', 'Unnamed Group')}]({group.get('link', '#')})")
-    else:
-        st.info("No messaging groups detected yet. Start a scan to find investment-related groups.")
+    
+    # Convert to DataFrame for easier visualization
+    platform_data = pd.DataFrame([
+        {"platform": platform, "count": count}
+        for platform, count in sorted(platform_counts.items(), key=lambda x: x[1], reverse=True)
+    ])
+    
+    return platform_data
 
-# Footer
-st.markdown("---")
-st.markdown(
-    "<div style='text-align:center; color:#00ff00;'>"
-    "MATRIX-INSPIRED INVESTMENT PLATFORM TRACKER | FOLLOW THE WHITE RABBIT"
-    "</div>", 
-    unsafe_allow_html=True
-)
+def get_messaging_group_statistics():
+    """Get statistics about messaging groups."""
+    videos = load_videos()
+    
+    # Collect all messaging groups
+    groups = []
+    for video in videos:
+        for group in video.get('messaging_groups', []):
+            groups.append(group)
+    
+    return groups
+
+def get_videos_by_platform(platform_name):
+    """Get videos that mention a specific platform."""
+    videos = load_videos()
+    return [v for v in videos if platform_name in v.get('platforms', [])]
+
+def start_scan(keywords, days_back, max_videos):
+    """Start scanning for videos with the given keywords."""
+    
+    # Create progress bar
+    progress_bar = st.progress(0)
+    status_text = st.empty()
+    
+    # Initialize scrapers
+    youtube_scraper = YouTubeScraper()
+    text_processor = TextProcessor()
+    
+    # Load existing videos
+    existing_videos = load_videos()
+    existing_ids = {v['id'] for v in existing_videos}
+    
+    # Track new videos
+    new_videos = []
+    keywords_list = [k.strip() for k in keywords.split(',')]
+    
+    # Scan for each keyword
+    for i, keyword in enumerate(keywords_list):
+        status_text.text(f"[*] Searching for videos related to '{keyword}'...")
+        progress = (i / len(keywords_list)) * 0.5
+        progress_bar.progress(progress)
+        
+        # Search for videos
+        videos = youtube_scraper.search_videos(keyword, days_back, max_videos // len(keywords_list))
+        
+        # Process each video
+        for j, video in enumerate(videos):
+            video_id = video['id']
+            
+            # Skip if we already have this video
+            if video_id in existing_ids:
+                continue
+                
+            # Update progress
+            sub_progress = progress + (j / len(videos)) * (0.5 / len(keywords_list))
+            progress_bar.progress(sub_progress)
+            status_text.text(f"[*] Processing video: {video['title']}")
+            
+            # Get video details
+            video_details = youtube_scraper.get_video_details(video_id)
+            if 'error' in video_details:
+                continue
+                
+            # Combine basic info with details
+            full_video = {**video, 'description': video_details.get('description', '')}
+            
+            # Process text to extract platforms, links, and messaging groups
+            platforms, links, groups = text_processor.process_video(full_video)
+            
+            # Add extracted data to the video
+            full_video['platforms'] = platforms
+            full_video['links'] = links
+            full_video['messaging_groups'] = groups
+            full_video['scan_date'] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            
+            # Add to new videos list
+            new_videos.append(full_video)
+            existing_ids.add(video_id)
+            
+    # Save all videos
+    all_videos = existing_videos + new_videos
+    save_videos(all_videos)
+    
+    # Complete progress
+    progress_bar.progress(1.0)
+    status_text.text(f"[+] Scan complete! Found {len(new_videos)} new videos.")
+    time.sleep(1)
+    
+    # Return success message
+    return f"Scan completed successfully. Found {len(new_videos)} new videos."
+
+def main():
+    # Header
+    header()
+    
+    # Sidebar
+    with st.sidebar:
+        terminal_container("TARGET CONFIGURATION", "")
+        st.write("Configure your scan parameters below:")
+        
+        keywords = st.text_input(
+            "Keywords:", 
+            value="plataforma de investimento, pagamento instantâneo, prova de pagamento, multinível", 
+            help="Enter comma-separated keywords to search for"
+        )
+        
+        days_back = st.slider(
+            "Days to look back:", 
+            min_value=1, 
+            max_value=30, 
+            value=7,
+            help="How many days to look back for videos"
+        )
+        
+        max_videos = st.slider(
+            "Max videos per keyword:", 
+            min_value=5, 
+            max_value=50,
+            value=10,
+            help="Maximum number of videos to scan per keyword"
+        )
+        
+        # Scan options
+        terminal_container("SCAN OPTIONS", "")
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            youtube = st.checkbox("YouTube", value=True)
+        with col2:
+            facebook = st.checkbox("Facebook", value=False)
+            
+        col1, col2 = st.columns(2)
+        with col1:
+            tiktok = st.checkbox("TikTok", value=False)
+        with col2:
+            instagram = st.checkbox("Instagram", value=False)
+        
+        # Execute scan button
+        st.markdown("")
+        if st.button("▶ EXECUTE SCAN", use_container_width=True):
+            if any([youtube, facebook, tiktok, instagram]):
+                # Show a terminal animation
+                console_content = st.empty()
+                for i in range(5):
+                    console_content.markdown(f"""
+                    <div class="console-log">
+                    root@scanner:~# ./security_scanner.sh --target "{keywords}" --days {days_back} --max {max_videos}
+                    {'.' * (i+1)}
+                    </div>
+                    """, unsafe_allow_html=True)
+                    time.sleep(0.5)
+                
+                # Start the scan
+                result = start_scan(keywords, days_back, max_videos)
+                console_content.markdown(f"""
+                <div class="console-log">
+                root@scanner:~# ./security_scanner.sh --target "{keywords}" --days {days_back} --max {max_videos}
+                {result}
+                </div>
+                """, unsafe_allow_html=True)
+            else:
+                warning("Please select at least one platform to scan.")
+    
+    # Main content area
+    col1, col2 = st.columns([2, 1])
+    
+    with col1:
+        # Statistics dashboard
+        terminal_container("SCAN STATISTICS", "")
+        
+        # Load data
+        videos = load_videos()
+        platform_data = get_platform_statistics()
+        messaging_groups = get_messaging_group_statistics()
+        
+        if videos:
+            # Key metrics
+            met1, met2, met3 = st.columns(3)
+            with met1:
+                st.metric("Total Videos", len(videos))
+            with met2:
+                platform_count = len(set(p for v in videos for p in v.get('platforms', [])))
+                st.metric("Unique Platforms", platform_count)
+            with met3:
+                group_count = len(messaging_groups)
+                st.metric("Messaging Groups", group_count)
+                
+            # Timeline visualization
+            if len(videos) >= 3:
+                dates = [datetime.datetime.strptime(v.get('scan_date', '2023-01-01 00:00:00'), "%Y-%m-%d %H:%M:%S").date() for v in videos]
+                date_counts = {}
+                for date in dates:
+                    if date in date_counts:
+                        date_counts[date] += 1
+                    else:
+                        date_counts[date] = 1
+                
+                date_df = pd.DataFrame([
+                    {"date": date, "count": count}
+                    for date, count in sorted(date_counts.items())
+                ])
+                
+                fig = px.line(
+                    date_df, 
+                    x='date', 
+                    y='count',
+                    title="Videos Tracked Over Time",
+                    labels={"date": "Date", "count": "Number of Videos"}
+                )
+                
+                fig.update_layout(
+                    plot_bgcolor='rgba(0,0,0,0)',
+                    paper_bgcolor='rgba(0,0,0,0)',
+                    font_color='#00ff00',
+                    xaxis=dict(showgrid=False),
+                    yaxis=dict(showgrid=False),
+                    margin=dict(l=0, r=0, t=30, b=0)
+                )
+                
+                st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.info("No data available. Start a scan to collect statistics.")
+    
+    with col2:
+        # Terminal output
+        terminal_container("SECURITY TERMINAL", "")
+        if videos:
+            console_print(f"""
+            $ ./status_check.sh
+            [+] System initialized
+            [+] Database connected
+            [+] {len(videos)} videos in database
+            [+] {len(set(p for v in videos for p in v.get('platforms', [])))} unique platforms detected
+            [+] {len(messaging_groups)} messaging groups found
+            [+] Scan engine ready
+            """)
+        else:
+            console_print("""
+            $ ./status_check.sh
+            [+] System initialized
+            [+] Database connected
+            [!] No data available
+            [+] Scan engine ready
+            """)
+    
+    # Create tabs for different views
+    tab1, tab2, tab3 = st.tabs(["Videos", "Platforms", "Messaging Groups"])
+    
+    with tab1:
+        # Videos tab
+        terminal_container("VIDEO ANALYSIS", "")
+        if videos:
+            # Show videos in a table
+            video_df = pd.DataFrame([
+                {
+                    "Title": v.get('title', 'Unknown'),
+                    "Channel": v.get('channel_name', 'Unknown'),
+                    "Published": v.get('publish_date', 'Unknown'),
+                    "Platforms": ", ".join(v.get('platforms', [])),
+                    "Groups": len(v.get('messaging_groups', [])),
+                    "Links": len(v.get('links', [])),
+                    "ID": v.get('id', '')
+                }
+                for v in videos
+            ])
+            
+            st.dataframe(video_df, use_container_width=True)
+            
+            # Video details
+            st.markdown("### Video Details")
+            
+            # Select a video to view details
+            selected_video_id = st.selectbox("Select a video to view details:", 
+                                            options=[v.get('id', '') for v in videos],
+                                            format_func=lambda x: next((v.get('title', 'Unknown') for v in videos if v.get('id', '') == x), 'Unknown'))
+            
+            if selected_video_id:
+                # Find the selected video
+                selected_video = next((v for v in videos if v.get('id', '') == selected_video_id), None)
+                
+                if selected_video:
+                    # Display video details in a terminal-like container
+                    content = f"""
+                    <span style="color: #4cd964;">Title:</span> {selected_video.get('title', 'Unknown')}
+                    <span style="color: #4cd964;">Channel:</span> {selected_video.get('channel_name', 'Unknown')}
+                    <span style="color: #4cd964;">Published:</span> {selected_video.get('publish_date', 'Unknown')}
+                    <span style="color: #4cd964;">Views:</span> {selected_video.get('view_count', 'Unknown')}
+                    <span style="color: #4cd964;">URL:</span> https://youtube.com/watch?v={selected_video.get('id', '')}
+                    
+                    <span style="color: #4cd964;">Detected Platforms:</span>
+                    {", ".join(selected_video.get('platforms', ['None detected']))}
+                    
+                    <span style="color: #4cd964;">Links Found:</span>
+                    {", ".join(selected_video.get('links', ['None detected']))}
+                    
+                    <span style="color: #4cd964;">Messaging Groups:</span>
+                    {", ".join([f"{g.get('platform', 'Unknown')}: {g.get('name', 'Unknown')}" for g in selected_video.get('messaging_groups', []) if 'platform' in g]) or 'None detected'}
+                    """
+                    
+                    terminal_container(f"VIDEO: {selected_video.get('id', '')}", content)
+        else:
+            st.info("No videos have been scanned yet. Start a scan to track investment videos.")
+    
+    with tab2:
+        # Platforms tab
+        terminal_container("PLATFORM ANALYSIS", "")
+        
+        if not platform_data.empty if isinstance(platform_data, pd.DataFrame) else False:
+            # Platform bar chart
+            fig = px.bar(
+                platform_data,
+                x='count',
+                y='platform',
+                orientation='h',
+                title="Detected Investment Platforms",
+                color='count',
+                color_continuous_scale=['#00ff00', '#ffff00', '#ff0000']
+            )
+            
+            fig.update_layout(
+                plot_bgcolor='rgba(0,0,0,0)',
+                paper_bgcolor='rgba(0,0,0,0)',
+                font_color='#00ff00',
+                xaxis=dict(title="Mentions", showgrid=False),
+                yaxis=dict(title="", showgrid=False),
+                margin=dict(l=0, r=0, t=30, b=0)
+            )
+            
+            st.plotly_chart(fig, use_container_width=True)
+            
+            # Platform details
+            for idx, row in platform_data.iterrows():
+                platform = row['platform']
+                count = row['count']
+                with st.expander(f"{platform} ({count} mentions)"):
+                    platform_videos = get_videos_by_platform(platform)
+                    for video in platform_videos:
+                        st.markdown(f"- [{video.get('title', 'Unknown')}](https://youtube.com/watch?v={video.get('id', '')})")
+        else:
+            st.info("No platform data available. Start a scan to track investment platforms.")
+    
+    with tab3:
+        # Messaging groups tab
+        terminal_container("MESSAGING GROUP ANALYSIS", "")
+        
+        if isinstance(messaging_groups, list) and len(messaging_groups) > 0:
+            # Count by platform
+            platform_counts = {}
+            for group in messaging_groups:
+                platform = group.get('platform', 'Unknown')
+                if platform in platform_counts:
+                    platform_counts[platform] += 1
+                else:
+                    platform_counts[platform] = 1
+            
+            # Create pie chart
+            fig = px.pie(
+                names=list(platform_counts.keys()),
+                values=list(platform_counts.values()),
+                title="Messaging Groups by Platform",
+                color_discrete_sequence=['#00ff00', '#ff0000', '#0000ff', '#ffff00']
+            )
+            
+            fig.update_layout(
+                plot_bgcolor='rgba(0,0,0,0)',
+                paper_bgcolor='rgba(0,0,0,0)',
+                font_color='#00ff00',
+                margin=dict(l=0, r=0, t=30, b=0)
+            )
+            
+            st.plotly_chart(fig, use_container_width=True)
+            
+            # List all groups
+            st.markdown("### Detected Groups")
+            
+            # Group by platform
+            whatsapp_groups = [g for g in messaging_groups if g.get('platform') == 'WhatsApp']
+            telegram_groups = [g for g in messaging_groups if g.get('platform') == 'Telegram']
+            
+            if whatsapp_groups:
+                with st.expander(f"WhatsApp Groups ({len(whatsapp_groups)})", expanded=True):
+                    for group in whatsapp_groups:
+                        st.markdown(f"- {group.get('name', 'Unknown Group')}: [{group.get('link', '#')}]({group.get('link', '#')})")
+            
+            if telegram_groups:
+                with st.expander(f"Telegram Groups ({len(telegram_groups)})", expanded=True):
+                    for group in telegram_groups:
+                        st.markdown(f"- {group.get('name', 'Unknown Group')}: [{group.get('link', '#')}]({group.get('link', '#')})")
+        else:
+            st.info("No messaging groups detected yet. Start a scan to find investment-related groups.")
+
+if __name__ == "__main__":
+    main()

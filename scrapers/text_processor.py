@@ -1,5 +1,7 @@
 import re
-from typing import List, Dict, Any
+import json
+from typing import List, Dict, Any, Tuple
+from urllib.parse import urlparse
 
 class TextProcessor:
     """
@@ -8,27 +10,24 @@ class TextProcessor:
     
     def __init__(self):
         """Initialize the text processor with common investment platform keywords"""
-        # Common investment platform terms in Portuguese and English
+        # Common platform name keywords in Portuguese
         self.platform_keywords = [
-            'investimento', 'investment', 'plataforma', 'platform', 'ganhos', 'earnings',
-            'lucro', 'profit', 'renda', 'income', 'rendimento', 'yield', 'retorno', 'return',
-            'pagamento', 'payment', 'dinheiro', 'money', 'financeiro', 'financial',
-            'forex', 'trading', 'trade', 'trader', 'bitcoin', 'btc', 'crypto', 'cripto',
-            'stake', 'apostas', 'betting', 'cassino', 'casino', 'sorteio', 'loteria', 'lottery',
-            'multinível', 'multi-nível', 'multi level', 'mlm', 'marketing multinível',
-            'pirâmide', 'pyramid', 'ponzi', 'hyip', 'high yield'
+            'plataforma', 'investimento', 'trading', 'broker', 'forex', 'opções binárias',
+            'binário', 'criptomoeda', 'bitcoin', 'btc', 'bet', 'apostas', 'cassino',
+            'dinheiro', 'renda extra', 'ganhar', 'lucro', 'roi', 'retorno',
+            'day trade', 'trade', 'trader', 'pagamento', 'pix', 'depósito',
+            'saque', 'bônus', 'multinível', 'pirâmide'
         ]
         
-        # Known investment platform names
-        self.known_platforms = [
-            'blaze', 'bet365', 'binance', 'bitget', 'bybit', 'fox bet', 'betano',
-            'sporting bet', 'sportingbet', 'kto', 'esporte da sorte', 'bet7k', 'betfair',
-            'pixbet', 'betsson', 'parimatch', 'alphatrading', 'olymp trade', 'olymptrade',
-            'iqoption', 'iq option', 'xp investimentos', 'xp', 'clear', 'rico', 'nubank',
-            'atlas quantum', 'unick forex', 'trust investing', 'hehaka finance', 
-            'g44', 'g 44', 'tigerbet', 'tiger bet', 'bet national', 'betnacional',
-            'estrelabet', 'estrela bet', 'galerabet', 'galera bet'
+        # Common platform name prefixes/suffixes
+        self.name_patterns = [
+            r'\b[A-Z][a-z]*(?:Bet|Trade|Invest|Forex|Crypto|Pay|Cash|Earn|Money|FX|BTC)\b',
+            r'\b(?:Bet|Trade|Invest|Forex|Crypto|Pay|Cash|Earn|Money|FX|BTC)[A-Z][a-z]*\b',
+            r'\b[A-Z][a-z]*(?:Trader|Broker|Market|Exchange|Capital|Partners|Group|Bank)\b',
+            r'\b[A-Z][a-zA-Z0-9]*(?:\.io|\.com|\.net|\.app)\b'
         ]
+        
+        print("[+] Text processor initialized")
     
     def extract_platforms(self, text: str) -> List[str]:
         """
@@ -43,31 +42,68 @@ class TextProcessor:
         if not text:
             return []
         
-        detected_platforms = []
-        
-        # Check for known platforms
+        # Lowercase for case-insensitive searching
         text_lower = text.lower()
-        for platform in self.known_platforms:
-            if platform.lower() in text_lower:
-                if platform not in detected_platforms:
-                    detected_platforms.append(platform)
         
-        # Look for potential new platforms
-        # Pattern: platform name followed by investment-related term
-        patterns = [
-            r'([A-Z][a-zA-Z0-9\s]{2,20})\s(?:' + '|'.join(self.platform_keywords) + ')',
-            r'(?:plataforma|platform)\s(?:de\s)?(?:investimento|investment)?\s([A-Z][a-zA-Z0-9\s]{2,20})',
-            r'(?:' + '|'.join(self.platform_keywords) + ')\s(?:na|no|pela|pelo|with|on|at)?\s([A-Z][a-zA-Z0-9\s]{2,20})'
-        ]
+        # Dictionary to store platform candidates with their scores
+        platform_candidates = {}
         
-        for pattern in patterns:
-            matches = re.finditer(pattern, text, re.IGNORECASE)
+        # Look for phrases like "a plataforma XYZ" or "plataforma de investimento XYZ"
+        platform_phrases = re.findall(r'(?:a\s+)?plataforma\s+(?:de\s+investimento\s+)?([A-Za-z0-9]+[A-Za-z0-9\s]*)', text, re.IGNORECASE)
+        for phrase in platform_phrases:
+            name = phrase.strip()
+            if name and len(name) > 2:
+                # Higher score for explicit platform mentions
+                platform_candidates[name] = platform_candidates.get(name, 0) + 5
+        
+        # Look for words that match the name patterns (like FxTrade, CryptoBTC, etc.)
+        for pattern in self.name_patterns:
+            matches = re.findall(pattern, text)
             for match in matches:
-                platform_name = match.group(1).strip()
-                if len(platform_name) >= 3 and platform_name.lower() not in [p.lower() for p in detected_platforms]:
-                    detected_platforms.append(platform_name)
+                if match and len(match) > 2:
+                    platform_candidates[match] = platform_candidates.get(match, 0) + 3
         
-        return detected_platforms
+        # Look for capitalized words near keywords
+        for keyword in self.platform_keywords:
+            if keyword in text_lower:
+                # Find the position of the keyword
+                positions = [m.start() for m in re.finditer(re.escape(keyword), text_lower)]
+                
+                for pos in positions:
+                    # Get a window of text around the keyword
+                    start = max(0, pos - 50)
+                    end = min(len(text), pos + 50 + len(keyword))
+                    window = text[start:end]
+                    
+                    # Look for capitalized words in this window
+                    cap_words = re.findall(r'\b[A-Z][a-zA-Z0-9]{2,15}\b', window)
+                    for word in cap_words:
+                        if word and word.lower() not in ['o', 'os', 'a', 'as', 'de', 'da', 'do', 'das', 'dos']:
+                            platform_candidates[word] = platform_candidates.get(word, 0) + 2
+        
+        # Sort candidates by score and filter out low-scoring ones
+        sorted_candidates = sorted(platform_candidates.items(), key=lambda x: x[1], reverse=True)
+        platforms = [name for name, score in sorted_candidates if score >= 2]
+        
+        # Remove duplicates while preserving order
+        unique_platforms = []
+        for platform in platforms:
+            # Skip very short names or common words
+            if len(platform) <= 2 or platform.lower() in ['sim', 'não', 'pix', 'app', 'site', 'link']:
+                continue
+                
+            # Check if it's a variation of an already added platform
+            duplicate = False
+            for existing in unique_platforms:
+                if platform.lower() in existing.lower() or existing.lower() in platform.lower():
+                    duplicate = True
+                    break
+            
+            if not duplicate:
+                unique_platforms.append(platform)
+        
+        print(f"[+] Extracted {len(unique_platforms)} potential platform names")
+        return unique_platforms
     
     def extract_links(self, text: str) -> List[str]:
         """
@@ -82,20 +118,23 @@ class TextProcessor:
         if not text:
             return []
         
-        # URL pattern
-        url_pattern = r'https?://(?:[-\w.]|(?:%[\da-fA-F]{2}))+(?:/[-\w%!./?=&+#]*)?'
-        
-        # Find all URLs
+        # URL pattern matching
+        url_pattern = r'https?://(?:[-\w.]|(?:%[\da-fA-F]{2}))+[/\w\.-]*(?:\?[/\w\.-=&]*)?'
         urls = re.findall(url_pattern, text)
         
-        # Clean URLs
-        clean_urls = []
+        # Filter out YouTube and common URLs
+        filtered_urls = []
         for url in urls:
-            # Filter out YouTube and common social media links
-            if not any(domain in url.lower() for domain in ['youtube.com', 'youtu.be', 'instagram.com', 'facebook.com', 'twitter.com']):
-                clean_urls.append(url)
+            domain = urlparse(url).netloc
+            if ("youtube.com" not in domain and 
+                "youtu.be" not in domain and
+                "google.com" not in domain and
+                "facebook.com" not in domain and
+                "instagram.com" not in domain):
+                filtered_urls.append(url)
         
-        return clean_urls
+        print(f"[+] Extracted {len(filtered_urls)} URLs")
+        return filtered_urls
     
     def extract_messaging_groups(self, text: str) -> List[Dict[str, Any]]:
         """
@@ -112,43 +151,75 @@ class TextProcessor:
         
         groups = []
         
-        # WhatsApp group patterns
-        whatsapp_patterns = [
-            r'https?://(?:www\.)?chat\.whatsapp\.com/(?:[-\w%!./?=&+#]*)',
-            r'https?://(?:www\.)?wa\.me/(?:[-\w%!./?=&+#]*)'
-        ]
-        
-        # Telegram group patterns
-        telegram_patterns = [
-            r'https?://(?:www\.)?t\.me/(?:[-\w%!./?=&+#]*)',
-            r'https?://(?:www\.)?telegram\.me/(?:[-\w%!./?=&+#]*)'
-        ]
-        
         # Extract WhatsApp groups
-        for pattern in whatsapp_patterns:
-            matches = re.findall(pattern, text)
-            for match in matches:
-                groups.append({
-                    'platform': 'WhatsApp',
-                    'link': match,
-                    'name': 'WhatsApp Group'
-                })
+        whatsapp_pattern = r'https?://(?:chat\.)?whatsapp\.com/(?:invite/)?(?:[-\w]*)'
+        whatsapp_links = re.findall(whatsapp_pattern, text)
         
-        # Extract Telegram groups
-        for pattern in telegram_patterns:
-            matches = re.findall(pattern, text)
-            for match in matches:
-                # Try to extract group name from link
-                group_name = match.split('/')[-1]
-                if group_name:
-                    name = f"Telegram: {group_name}"
-                else:
-                    name = "Telegram Group"
+        for i, link in enumerate(whatsapp_links):
+            # Try to find a name near the link
+            link_pos = text.find(link)
+            if link_pos >= 0:
+                start = max(0, link_pos - 100)
+                end = min(len(text), link_pos + len(link) + 100)
+                window = text[start:end]
+                
+                # Look for potential group names
+                name_match = re.search(r'grupo\s+(?:do|de|da)?\s+([A-Za-z0-9\s]{3,30})', window, re.IGNORECASE)
+                name = f"WhatsApp Group {i+1}"
+                if name_match:
+                    name = name_match.group(1).strip()
                 
                 groups.append({
-                    'platform': 'Telegram',
-                    'link': match,
-                    'name': name
+                    "platform": "WhatsApp",
+                    "name": name,
+                    "link": link
                 })
         
+        # Extract Telegram groups/channels
+        telegram_pattern = r'https?://(?:t\.me|telegram\.me|telegram\.dog)/(?:joinchat/)?(?:[-\w]*)'
+        telegram_links = re.findall(telegram_pattern, text)
+        
+        for i, link in enumerate(telegram_links):
+            # Try to find a name near the link
+            link_pos = text.find(link)
+            if link_pos >= 0:
+                start = max(0, link_pos - 100)
+                end = min(len(text), link_pos + len(link) + 100)
+                window = text[start:end]
+                
+                # Look for potential group/channel names
+                name_match = re.search(r'(?:canal|grupo|channel)\s+(?:do|de|da)?\s+([A-Za-z0-9\s]{3,30})', window, re.IGNORECASE)
+                name = f"Telegram Channel {i+1}"
+                if name_match:
+                    name = name_match.group(1).strip()
+                
+                groups.append({
+                    "platform": "Telegram",
+                    "name": name,
+                    "link": link
+                })
+        
+        print(f"[+] Extracted {len(groups)} messaging groups/channels")
         return groups
+    
+    def process_video(self, video: Dict[str, Any]) -> Tuple[List[str], List[str], List[Dict[str, Any]]]:
+        """
+        Process a video to extract platforms, links, and messaging groups
+        
+        Args:
+            video: Video dictionary containing title and description
+            
+        Returns:
+            Tuple of (platforms, links, groups)
+        """
+        # Combine title and description
+        title = video.get('title', '')
+        description = video.get('description', '')
+        combined_text = f"{title}\n\n{description}"
+        
+        # Extract data
+        platforms = self.extract_platforms(combined_text)
+        links = self.extract_links(combined_text)
+        groups = self.extract_messaging_groups(combined_text)
+        
+        return platforms, links, groups
